@@ -1,0 +1,10 @@
+tensorboard_logs_root = '/nas/home/cborrelli/bot_speech/logs/scalars/'
+checkpoint_root = '/nas/home/cborrelli/bot_speech/checkpoint/'
+history_root = '/nas/home/cborrelli/bot_speech/history/'
+feature_root = '/nas/home/cborrelli/bot_speech/features/lpc'
+preprocessing_root = '/nas/home/cborrelli/bot_speech/preprocessing/'
+out_root = '/nas/home/cborrelli/bot_speech/results/'
+project_root = '/nas/home/cborrelli/bot_speech/train/'
+batch_size = 128
+num_classes = 2
+epochs = 12
