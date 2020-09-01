@@ -1,11 +1,10 @@
 import pandas as pd
 import numpy as np
-import sys
 import os
-import scipy.stats as stats
 import time
 import tqdm
 from sklearn.metrics import confusion_matrix
+import pickle
 from sklearn.preprocessing import *
 from sklearn.svm import *
 from sklearn.pipeline import *
@@ -14,35 +13,59 @@ import itertools
 import argparse
 from sklearn.preprocessing import normalize
 from sklearn.ensemble import RandomForestClassifier
+import logging
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')
+
+result_root_path = '/nas/home/cborrelli/bot_speech/results'
+feature_root_path = '/nas/home/cborrelli/bot_speech/features'
+
 
 unknown_label = 7
 unknown_number = 2
 
+def_nfft = 512
+def_hop_size = 256
 def_selected_features = ['lpc', 'bicoh', 'unet']
-def_number_lpc_order = 49
+def_number_lpc_order = 10
 def_stop_lpc_order = 50
+def_normalizers_keys = ["minmax_norm", "zscore_norm",  "l2_norm"]
+def_classifiers_keys = ["svm", "rf"]
 
-multiclass_list = ['-', 'A01', 'A02', 'A03', 'A04', 'A05', 'A06']
 
-normalization_step = {"minmax_norm": MinMaxScaler(), "zscore_norm": StandardScaler(), "l2_norm": Normalizer()}
-classification_step = {"svm": SVC(random_state=2), "rf": RandomForestClassifier(random_state=2)}
+normalizers = {"minmax_norm": MinMaxScaler(), "zscore_norm": StandardScaler(), "l2_norm": Normalizer()}
+classifiers = {"svm": SVC(random_state=2), "rf": RandomForestClassifier(random_state=2)}
+include_bonafide_knownunknown = False
+
+if include_bonafide_knownunknown:
+    multiclass_list = ['-', 'A01', 'A02', 'A03', 'A04', 'A05', 'A06']
+else:
+    multiclass_list = ['A01', 'A02', 'A03', 'A04', 'A05', 'A06']
+
+
+
 
 
 def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop_size):
-    bicoh_train_feat_path = '../features/bicoherences/dataframes/train_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(
-        nfft, hop_size)
-    lpc_train_feat_path = '../features/lpc/dataframe/train.pkl'
-    unet_train_feat_path = '../features/unet/train_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size)
+    logging.debug("Loading features")
+    bicoh_train_feat_path = os.path.join(
+        feature_root_path,
+        'bicoherences/dataframes/train_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
+    lpc_train_feat_path = os.path.join(feature_root_path, 'lpc/dataframe/train.pkl')
+    unet_train_feat_path = os.path.join(feature_root_path, 'unet/train_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
 
-    bicoh_dev_feat_path = '../features/bicoherences/dataframes/dev_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(
-        nfft, hop_size)
-    lpc_dev_feat_path = '../features/lpc/dataframe/dev.pkl'
-    unet_dev_feat_path = '../features/unet/dev_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size)
+    bicoh_dev_feat_path = os.path.join(
+        feature_root_path,
+        'bicoherences/dataframes/dev_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
+    lpc_dev_feat_path = os.path.join(feature_root_path, 'lpc/dataframe/dev.pkl')
+    unet_dev_feat_path = os.path.join(feature_root_path, 'unet/dev_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
 
-    bicoh_eval_feat_path = '../features/bicoherences/dataframes/eval_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(
-        nfft, hop_size)
-    lpc_eval_feat_path = '../features/lpc/dataframe/eval.pkl'
-    unet_eval_feat_path = '../features/unet/eval_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size)
+    bicoh_eval_feat_path = os.path.join(
+        feature_root_path,
+        'bicoherences/dataframes/eval_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(
+        nfft, hop_size))
+    lpc_eval_feat_path = os.path.join(feature_root_path, 'lpc/dataframe/eval.pkl')
+    unet_eval_feat_path = os.path.join(feature_root_path, 'unet/eval_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
 
     lpc_linspace = np.linspace(start=stop_lpc_order - number_lpc_order, stop=stop_lpc_order, dtype=int)
 
@@ -126,6 +149,10 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
                 train_features = pd.concat([train_features, unet_feat_train], axis=1)
                 dev_features = pd.concat([dev_features, unet_feat_dev], axis=1)
                 eval_features = pd.concat([eval_features, unet_feat_eval], axis=1)
+    # remove NaN from dataframes
+    train_features.dropna(inplace=True, axis=0)
+    dev_features.dropna(inplace=True, axis=0)
+    eval_features.dropna(inplace=True, axis=0)
 
     # remove duplicates from dataframes
     train_features = train_features.loc[:, ~train_features.columns.duplicated()]
@@ -145,12 +172,12 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
     return train_features, dev_features, eval_features
 
 
-
-def train_one_configuration(n_key, c_key, u, df_train, df_dev, df_eval):
-    multiclass_dict = {'-': 0, 'A01': 1, 'A02': 2, 'A03': 3, 'A04': 4, 'A05': 5, 'A06': 6}
-
-    if u[0] == '-' or u[1] == '-':
+def train_one_configuration(n_key, c_key, u, df_train, df_dev, df_eval, result_filename):
+    if os.path.exists(result_filename):
+        print("Results already computed")
         return
+
+    multiclass_dict = {'-': 0, 'A01': 1, 'A02': 2, 'A03': 3, 'A04': 4, 'A05': 5, 'A06': 6}
 
     # label 8 corresponds to unknown known
     for i in range(len(u)):
@@ -161,19 +188,20 @@ def train_one_configuration(n_key, c_key, u, df_train, df_dev, df_eval):
     X_eval = df_eval.loc[:, df_eval.columns != 'system_id'].values
 
     y_train_open_set = df_train.loc[:, 'system_id'].values
-    y_train_open_set = [multiclass_dict[a] for a in y_train_open_set]
+    y_train_open_set = np.array([multiclass_dict[a] for a in y_train_open_set])
 
     y_dev_open_set = df_dev.loc[:, 'system_id'].values
-    y_dev_open_set = [multiclass_dict[a] for a in y_dev_open_set]
+    y_dev_open_set = np.array([multiclass_dict[a] for a in y_dev_open_set])
 
-    y_eval_open_set = unknown_label * np.ones(X_eval.shape[0])
+    y_eval_open_set = np.array(unknown_label * np.ones(X_eval.shape[0]))
 
     X = X_train
     y = y_train_open_set
 
 
+
     # Define the pipeline
-    steps = [('norm', normalization_step[n_key]), ('class', classification_step[c_key])]
+    steps = [('norm', normalizers[n_key]), ('class', classifiers[c_key])]
     pipeline = Pipeline(steps)
 
     if c_key == 'svm':
@@ -182,64 +210,93 @@ def train_one_configuration(n_key, c_key, u, df_train, df_dev, df_eval):
                       'class__kernel': ['rbf', 'linear', 'sigmoid']
                       }
     elif c_key == 'rf':
-        param_grid = {'class__n_estimators': [100, 300, 500, 800, 1200],
-                      'class__max_depth': [5, 8, 15, 25, 30],
-                      'class__min_samples_split': [2, 5, 10, 15, 100],
-                      'class__min_samples_leaf': [1, 2, 5, 10]
+        param_grid = {'class__n_estimators': [100, 500, 1000],
+                      'class__max_depth': [5, 15, 30, None],
+                      'class__min_samples_split': [2, 10, 50],
+                      'class__min_samples_leaf': [1, 5, 10]
                       }
+    else:
+        print("Wrong classifier name")
+        return
 
-
-    search = GridSearchCV(pipeline, param_grid=param_grid,  n_jobs=1)
+    logging.debug("Grid search")
+    search = GridSearchCV(pipeline, param_grid=param_grid,  n_jobs=-1)
     search.fit(X, y)
     model = search.best_estimator_
+    logging.debug("Fit best model")
 
     model.fit(X, y)
 
     y_predict_dev = model.predict(X_dev)
     y_predict_eval = model.predict(X_eval)
     y_predict_train = model.predict(X_train)
+    results = {
+        'y_train': y_train_open_set,
+        'y_predict_train': y_predict_train,
+        'y_dev': y_dev_open_set,
+        'y_predict_dev': y_predict_dev,
+        'y_eval': y_eval_open_set,
+        'y_predict_eval': y_predict_eval,
+        'best_model': search.best_params_
+    }
 
-    cm_train = confusion_matrix(y_train_open_set, y_predict_train, normalize='true')
-    cm_dev = confusion_matrix(y_dev_open_set, y_predict_dev, normalize='true')
-    cm_eval = confusion_matrix(y_eval_open_set, y_predict_eval, normalize='true')
+    logging.debug("Save results")
 
-    return cm_train, cm_dev, cm_eval
+    with open(result_filename, 'wb') as handle:
+        pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    return
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--nfft', type=int, required=True)
-    parser.add_argument('--hop_size', type=int, required=True)
+    parser.add_argument('--nfft',  nargs='+', required=False, default=def_nfft)
+    parser.add_argument('--hop_size',  nargs='+', required=False, default=def_hop_size)
     parser.add_argument('--selected_features', nargs='+', required=False, default=def_selected_features)
     parser.add_argument('--stop_lpc_order', type=int, required=False, default=def_stop_lpc_order)
     parser.add_argument('--number_lpc_order', type=int, required=False, default=def_number_lpc_order)
+    parser.add_argument('--classifiers', nargs='+', required=False, default=def_classifiers_keys)
+    parser.add_argument('--normalizers', nargs='+', required=False, default=def_normalizers_keys)
+
+
 
     args = parser.parse_args()
-    nfft = args.nfft
-    hop_size = args.hop_size
+    nfft_list = args.nfft
+    hop_size_list = args.hop_size
     selected_features = args.selected_features
     stop_lpc_order = args.stop_lpc_order
     number_lpc_order = args.number_lpc_order
+    classifiers_keys = args.classifiers
+    normalizers_keys = args.normalizers
+
+
 
     unknown_combinations = itertools.combinations(multiclass_list, unknown_number)
-
-    # TODO: call train_one_configuration for different elements of unknown combinations and different normalization +
-    #  classification steps
-    n_keys = list(normalization_step.keys())
-    c_keys = list(classification_step.keys())
     uu = list(unknown_combinations)
-    nfft = 128
-    hop_size = 64
-    #print(n_keys[0])
     # Load features
-    df_train, df_dev, df_eval = load_features(selected_features=selected_features,
-                                              number_lpc_order=number_lpc_order,
-                                              stop_lpc_order=stop_lpc_order,
-                                              nfft=nfft,
-                                              hop_size=hop_size)
+
     # Prepare data for open set
-    train_one_configuration(u=uu[0], n_key=n_keys[0], c_key=c_keys[0], df_train=df_train, df_dev=df_dev, df_eval=df_eval)
-    #
+    for nfft in nfft_list:
+        for hop_size in hop_size_list:
+            df_train, df_dev, df_eval = load_features(selected_features=selected_features,
+                                                      number_lpc_order=number_lpc_order,
+                                                      stop_lpc_order=stop_lpc_order,
+                                                      nfft=nfft,
+                                                      hop_size=hop_size)
+            for c in classifiers_keys:
+                for n in normalizers_keys:
+                    u = uu[0]
+                    t0 = time.time()
+                    result_filename = "class_{}_norm_{}_unknown_{}_nfft_{}_hop-size_{}_selectedfeatures_{" \
+                                      "}_numberlpcorder_{}_stoplpcorder_{}.pkl".format(c, n, u, nfft, hop_size,
+                                                                                       selected_features,
+                                                                                       number_lpc_order,
+                                                                                       stop_lpc_order)
+
+                    train_one_configuration(u=u, n_key=n, c_key=c, df_train=df_train, df_dev=df_dev, df_eval=df_eval,
+                                            result_filename=result_filename)
+                    print("TTS: {}".format(time.time() - t0))
+            #
     #
     #
     #
