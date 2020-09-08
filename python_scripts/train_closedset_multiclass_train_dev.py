@@ -16,14 +16,14 @@ os.nice(3)
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')
 
-result_root_path = '/nas/home/cborrelli/bot_speech/results/closed_set'
+result_root_path = '/nas/home/cborrelli/bot_speech/results/closed_set_multiclass_train_dev'
 feature_root_path = '/nas/home/cborrelli/bot_speech/features'
 
 unknown_label = 7
 unknown_number = 2
 
-def_nfft = [512]
-def_hop_size = [256]
+def_nfft = [128]
+def_hop_size = [64]
 def_selected_features = ['lpc', 'bicoh', 'unet']
 def_number_lpc_order = 49
 def_stop_lpc_order = 50
@@ -32,7 +32,6 @@ def_classifiers_keys = ["svm", "rf"]
 
 normalizers = {"minmax": MinMaxScaler(), "zscore": StandardScaler(), "l2": Normalizer()}
 classifiers = {"svm": SVC(random_state=2, class_weight='balanced'), "rf": RandomForestClassifier(random_state=2)}
-
 
 
 def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop_size):
@@ -49,12 +48,6 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
     lpc_dev_feat_path = os.path.join(feature_root_path, 'lpc/dataframe/dev.pkl')
     unet_dev_feat_path = os.path.join(feature_root_path, 'unet/dev_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
 
-    bicoh_eval_feat_path = os.path.join(
-        feature_root_path,
-        'bicoherences/dataframes/eval_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(
-            nfft, hop_size))
-    lpc_eval_feat_path = os.path.join(feature_root_path, 'lpc/dataframe/eval.pkl')
-    unet_eval_feat_path = os.path.join(feature_root_path, 'unet/eval_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
 
     lpc_linspace = np.linspace(start=stop_lpc_order - number_lpc_order, stop=stop_lpc_order, dtype=int)
 
@@ -66,7 +59,6 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
 
     train_features = pd.DataFrame()
     dev_features = pd.DataFrame()
-    eval_features = pd.DataFrame()
 
     for feat in selected_features:
         if feat == 'lpc':
@@ -76,26 +68,19 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
             lpc_feat_dev = pd.read_pickle(lpc_dev_feat_path)
             lpc_feat_dev.set_index('audio_filename', inplace=True)
 
-            lpc_feat_eval = pd.read_pickle(lpc_eval_feat_path)
-            lpc_feat_eval.set_index('audio_filename', inplace=True)
 
             drop_list = [a for a in lpc_feat_train.columns if a.startswith(('lpc', 'ltp'))
                          and not a.endswith(lpc_selected_orders)]
 
             lpc_feat_train = lpc_feat_train.drop(drop_list, axis=1)
             lpc_feat_dev = lpc_feat_dev.drop(drop_list, axis=1)
-            lpc_feat_eval = lpc_feat_eval.drop(drop_list, axis=1)
 
             if train_features.empty:
                 train_features = lpc_feat_train.copy()
-
                 dev_features = lpc_feat_dev.copy()
-
-                eval_features = lpc_feat_eval.copy()
             else:
                 train_features = pd.concat([train_features, lpc_feat_train], axis=1)
                 dev_features = pd.concat([dev_features, lpc_feat_dev], axis=1)
-                eval_features = pd.concat([eval_features, lpc_feat_eval], axis=1)
 
         elif feat == 'bicoh':
             bicoh_feat_train = pd.read_pickle(bicoh_train_feat_path)
@@ -104,19 +89,14 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
             bicoh_feat_dev = pd.read_pickle(bicoh_dev_feat_path)
             bicoh_feat_dev.set_index('audio_filename', inplace=True)
 
-            bicoh_feat_eval = pd.read_pickle(bicoh_eval_feat_path)
-            bicoh_feat_eval.set_index('audio_filename', inplace=True)
 
             if train_features.empty:
                 train_features = bicoh_feat_train.copy()
 
                 dev_features = bicoh_feat_dev.copy()
-
-                eval_features = bicoh_feat_eval.copy()
             else:
                 train_features = pd.concat([train_features, bicoh_feat_train], axis=1)
                 dev_features = pd.concat([dev_features, bicoh_feat_dev], axis=1)
-                eval_features = pd.concat([eval_features, bicoh_feat_eval], axis=1)
 
         elif feat == 'unet':
             unet_feat_train = pd.read_pickle(unet_train_feat_path)
@@ -125,93 +105,85 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
             unet_feat_dev = pd.read_pickle(unet_dev_feat_path)
             unet_feat_dev.set_index('audio_filename', inplace=True)
 
-            unet_feat_eval = pd.read_pickle(unet_eval_feat_path)
-            unet_feat_eval.set_index('audio_filename', inplace=True)
 
             if train_features.empty:
                 train_features = unet_feat_train.copy()
 
                 dev_features = unet_feat_dev.copy()
-
-                eval_features = unet_feat_eval.copy()
             else:
                 train_features = pd.concat([train_features, unet_feat_train], axis=1)
                 dev_features = pd.concat([dev_features, unet_feat_dev], axis=1)
-                eval_features = pd.concat([eval_features, unet_feat_eval], axis=1)
     # remove NaN from dataframes
     train_features.dropna(inplace=True, axis=0)
     dev_features.dropna(inplace=True, axis=0)
-    eval_features.dropna(inplace=True, axis=0)
 
     # remove duplicates from dataframes
     train_features = train_features.loc[:, ~train_features.columns.duplicated()]
     dev_features = dev_features.loc[:, ~dev_features.columns.duplicated()]
-    eval_features = eval_features.loc[:, ~eval_features.columns.duplicated()]
 
     # reset index after aggregating by audio filename
     train_features.reset_index(inplace=True)
     dev_features.reset_index(inplace=True)
-    eval_features.reset_index(inplace=True)
 
     # drop irrelevant columns for classification
-    train_features.drop(['audio_filename', 'end_voice', 'start_voice', 'speaker_id', 'system_id'], axis=1, inplace=True)
-    dev_features.drop(['audio_filename', 'end_voice', 'start_voice', 'speaker_id', 'system_id'], axis=1, inplace=True)
-    eval_features.drop(['audio_filename', 'end_voice', 'start_voice', 'speaker_id', 'system_id'], axis=1, inplace=True)
+    if "lpc" in selected_features:
+        train_features.drop(['audio_filename', 'end_voice', 'start_voice', 'speaker_id', 'label'], axis=1,
+                            inplace=True)
+        dev_features.drop(['audio_filename', 'end_voice', 'start_voice', 'speaker_id', 'label'], axis=1,
+                          inplace=True)
+    else:
+        train_features.drop(['audio_filename', 'speaker_id', 'label'], axis=1, inplace=True)
+        dev_features.drop(['audio_filename', 'speaker_id', 'label'], axis=1, inplace=True)
 
-    return train_features, dev_features, eval_features
+    return train_features, dev_features
 
 
-def train_one_configuration(n_key, c_key, df_train, df_dev, df_eval, result_filename):
+def train_one_configuration(n_key, c_key, df_train, df_dev, result_filename):
     if os.path.exists(result_filename):
-        print("Results already computed")
+        logging.debug("Results already computed")
         return
 
-    binary_dict = {'bonafide': 0, 'spoof': 1}
+    multiclass_dict = {'-': 0, 'A01': 1, 'A02': 2, 'A03': 3, 'A04': 4, 'A05': 5, 'A06': 6}
 
+    X_train = df_train.loc[:, df_train.columns != 'system_id'].values
+    # DEV set here is used as test set
+    X_eval = df_dev.loc[:, df_dev.columns != 'system_id'].values
 
-    X_train = df_train.loc[:, df_train.columns != 'label'].values
-    X_dev = df_dev.loc[:, df_dev.columns != 'label'].values
-    X_eval = df_eval.loc[:, df_eval.columns != 'label'].values
+    y_train = df_train.loc[:, 'system_id'].values
+    y_train = np.array([multiclass_dict[a] for a in y_train])
 
-    y_train = df_train.loc[:, 'label'].values
-    y_train = np.array([binary_dict[a] for a in y_train])
+    y_eval = df_dev.loc[:, 'system_id'].values
+    y_eval = np.array([multiclass_dict[a] for a in y_eval])
 
-    y_dev = df_dev.loc[:, 'label'].values
-    y_dev = np.array([binary_dict[a] for a in y_dev])
-
-    y_eval = df_eval.loc[:, 'label'].values
-    y_eval = np.array([binary_dict[a] for a in y_eval])
-
-    X = X_train
-    y = y_train
+    X_train, X_dev, y_train, y_dev = train_test_split(X_train, y_train, test_size=0.25,
+                                                      random_state=2)  # 0.25 x 0.8 = 0.2
 
     # Define the pipeline
     steps = [('norm', normalizers[n_key]), ('class', classifiers[c_key])]
     pipeline = Pipeline(steps)
 
     if c_key == 'svm':
-        param_grid = {'class__C': [0.1, 1, 10],
+        param_grid = {'class__C': [100, 1000],
                       'class__gamma': [1, 0.1, 0.01],
                       'class__kernel': ['rbf', 'linear']
                       }
     elif c_key == 'rf':
         param_grid = {'class__n_estimators': [100, 500, 1000],
-                      'class__max_depth': [5, 15, 30, None],
-                      'class__min_samples_split': [2, 10, 50],
-                      'class__min_samples_leaf': [1, 5, 10]
+                      'class__max_depth': [30, None],
+                      'class__min_samples_split': [2],
+                      'class__min_samples_leaf': [1]
                       }
     else:
         print("Wrong classifier name")
         return
 
-
     logging.debug("Grid search")
     search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=-1)
-    search.fit(X, y)
+    search.fit(X_dev, y_dev)
     model = search.best_estimator_
     logging.debug("Fit best model")
 
-    model.fit(X, y)
+    model.fit(X_train, y_train)
 
     y_predict_dev = model.predict(X_dev)
     y_predict_eval = model.predict(X_eval)
@@ -256,30 +228,31 @@ if __name__ == '__main__':
     # Load features
 
     # Prepare data for open set
-    for nfft in nfft_list:
-        for hop_size in hop_size_list:
-            df_train, df_dev, df_eval = load_features(selected_features=selected_features,
-                                                      number_lpc_order=number_lpc_order,
-                                                      stop_lpc_order=stop_lpc_order,
-                                                      nfft=nfft,
-                                                      hop_size=hop_size)
-            for c in classifiers_keys:
-                logging.debug("Classifier {}".format(c))
-                for n in normalizers_keys:
-                    logging.debug("Normalization {}".format(n))
-                    result_name = "class_{}_norm_{}_nfft_{}_hop-size_{}_numberlpcorder_{}_stoplpcorder_{}".format(
-                        c, n, nfft, hop_size,
-                        number_lpc_order,
-                        stop_lpc_order)
+    for fft_params in zip(nfft_list, hop_size_list):
+        nfft = fft_params[0]
+        hop_size = fft_params[1]
+        df_train, df_dev = load_features(selected_features=selected_features,
+                                                  number_lpc_order=number_lpc_order,
+                                                  stop_lpc_order=stop_lpc_order,
+                                                  nfft=nfft,
+                                                  hop_size=hop_size)
+        for c in classifiers_keys:
+            logging.debug("Classifier {}".format(c))
+            for n in normalizers_keys:
+                logging.debug("Normalization {}".format(n))
+                result_name = "class_{}_norm_{}_nfft_{}_hop-size_{}_numberlpcorder_{}_stoplpcorder_{}".format(
+                    c, n, nfft, hop_size,
+                    number_lpc_order,
+                    stop_lpc_order)
 
-                    result_name = result_name + "_selected_features_" + "-".join(
-                        s for s in selected_features) + ".npy"
+                result_name = result_name + "_selected_features_" + "-".join(
+                    s for s in selected_features) + ".npy"
 
-                    result_filename = os.path.join(result_root_path, result_name)
-                    train_one_configuration(n_key=n,
-                                            c_key=c, df_train=df_train,
-                                            df_dev=df_dev, df_eval=df_eval,
-                                            result_filename=result_filename)
+                result_filename = os.path.join(result_root_path, result_name)
+                train_one_configuration(n_key=n,
+                                        c_key=c, df_train=df_train,
+                                        df_dev=df_dev,
+                                        result_filename=result_filename)
 
     logging.debug("Finished")
 
