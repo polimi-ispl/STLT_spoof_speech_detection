@@ -30,7 +30,7 @@ def_stop_lpc_order = 50
 def_normalizers_keys = ["minmax", "zscore", "l2"]
 def_classifiers_keys = ["svm", "rf"]
 
-normalizers = {"minmax": MinMaxScaler(), "zscore": StandardScaler(), "l2": Normalizer()}
+normalizers = {"minmax": MinMaxScaler(feature_range=(-1, 1)), "zscore": StandardScaler(), "l2": Normalizer()}
 classifiers = {"svm": SVC(random_state=2, class_weight='balanced'), "rf": RandomForestClassifier(random_state=2)}
 
 
@@ -139,9 +139,9 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
 
 
 def train_one_configuration(n_key, c_key, df_train, df_dev, result_filename):
-    if os.path.exists(result_filename):
-        logging.debug("Results already computed")
-        return
+    #if os.path.exists(result_filename):
+    #    logging.debug("Results already computed")
+    #    return
 
     multiclass_dict = {'-': 0, 'A01': 1, 'A02': 2, 'A03': 3, 'A04': 4, 'A05': 5, 'A06': 6}
 
@@ -163,22 +163,26 @@ def train_one_configuration(n_key, c_key, df_train, df_dev, result_filename):
     pipeline = Pipeline(steps)
 
     if c_key == 'svm':
-        param_grid = {'class__C': [100, 1000],
-                      'class__gamma': [1, 0.1, 0.01],
-                      'class__kernel': ['rbf', 'linear']
-                      }
+        param_grid = [{'class__C': [0.1, 1, 10, 100, 1000],
+                      'class__gamma': ['scale', 'auto', 1, 0.1, 0.01],
+                       'class__kernel': ['rbf'],
+                       'class__decision_function_shape': ['ovo', 'ovr']
+                      }, {'class__C': [0.1, 1, 10, 100, 1000],
+                       'class__kernel': ['linear'],
+                        'class__decision_function_shape': ['ovo', 'ovr']}]
     elif c_key == 'rf':
-        param_grid = {'class__n_estimators': [100, 500, 1000],
+        param_grid = {'class__n_estimators': [10, 100, 500, 1000],
                       'class__max_depth': [30, None],
                       'class__min_samples_split': [2],
-                      'class__min_samples_leaf': [1]
+                      'class__min_samples_leaf': [1],
+                      'class__criterion': ['gini', 'entropy']
                       }
     else:
         print("Wrong classifier name")
         return
 
     logging.debug("Grid search")
-    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=-1)
+    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=16, verbose=1, cv=2, scoring='balanced_accuracy', return_train_score=True)
     search.fit(X_dev, y_dev)
     model = search.best_estimator_
     logging.debug("Fit best model")

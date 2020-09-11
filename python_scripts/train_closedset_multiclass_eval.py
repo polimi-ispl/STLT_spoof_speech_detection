@@ -111,9 +111,9 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
 
 
 def train_one_configuration(n_key, c_key, df_eval, result_filename):
-    if os.path.exists(result_filename):
-        logging.debug("Results already computed")
-        return
+    #if os.path.exists(result_filename):
+    #    logging.debug("Results already computed")
+    #    return
 
     multiclass_dict = {'-': 0, 'A07': 1, 'A08': 2, 'A09': 3, 'A10': 4, 'A11': 5, 'A12': 6, 'A13': 7, 'A14': 8,
                        'A15': 9, 'A16': 10, 'A17': 11, 'A18': 12, 'A19': 13}
@@ -132,22 +132,27 @@ def train_one_configuration(n_key, c_key, df_eval, result_filename):
     pipeline = Pipeline(steps)
 
     if c_key == 'svm':
-        param_grid = {'class__C': [100, 1000],
-                      'class__gamma': [1, 0.1, 0.01],
-                      'class__kernel': ['rbf', 'linear']
-                      }
+        param_grid = [{'class__C': [0.1, 1, 10, 100, 1000],
+                       'class__gamma': ['scale', 'auto', 1, 0.1, 0.01],
+                       'class__kernel': ['rbf'],
+                       #'class__decision_function_shape': ['ovo', 'ovr']
+                       }, {'class__C': [0.1, 1, 10, 100, 1000],
+                           'class__kernel': ['linear'],
+                           #'class__decision_function_shape': ['ovo', 'ovr']
+                        }]
     elif c_key == 'rf':
-        param_grid = {'class__n_estimators': [100, 500, 1000],
+        param_grid = {'class__n_estimators': [10, 100, 500, 1000],
                       'class__max_depth': [30, None],
                       'class__min_samples_split': [2],
-                      'class__min_samples_leaf': [1]
+                      'class__min_samples_leaf': [1],
+                      'class__criterion': ['gini', 'entropy']
                       }
     else:
         print("Wrong classifier name")
         return
 
     logging.debug("Grid search")
-    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=-1)
+    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=16, verbose=1, cv=2, scoring='balanced_accuracy', return_train_score=True)
     search.fit(X_dev, y_dev)
     model = search.best_estimator_
     logging.debug("Fit best model")

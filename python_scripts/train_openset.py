@@ -175,9 +175,9 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
 
 
 def train_one_configuration(n_key, c_key, u, df_train, df_dev, df_eval, result_filename):
-    if os.path.exists(result_filename):
-        print("Results already computed")
-        return
+    #if os.path.exists(result_filename):
+    #    print("Results already computed")
+    #    return
 
     multiclass_dict = {'-': 0, 'A01': 1, 'A02': 2, 'A03': 3, 'A04': 4, 'A05': 5, 'A06': 6}
     eval_multiclass_dict = {'-': 0, 'A07': unknown_label, 'A08': unknown_label, 'A09': unknown_label,
@@ -220,31 +220,27 @@ def train_one_configuration(n_key, c_key, u, df_train, df_dev, df_eval, result_f
     pipeline = Pipeline(steps)
 
     if c_key == 'svm':
-        #param_grid = {'class__C': [0.1, 1, 10, 100, 1000],
-        #               'class__gamma': [1, 0.1, 0.01, 0.001, 0.0001],
-        #               'class__kernel': ['rbf', 'linear', 'sigmoid']
-        #              }
-        param_grid = {'class__C': [100, 1000],
-                      'class__gamma': [1, 0.1, 0.01],
-                       'class__kernel': ['rbf', 'linear']
-                      }
+        param_grid = [{'class__C': [0.1, 1, 10, 100, 1000],
+                       'class__gamma': ['scale', 'auto', 1, 0.1, 0.01],
+                       'class__kernel': ['rbf'],
+                       #'class__decision_function_shape': ['ovo', 'ovr']
+                       }, {'class__C': [0.1, 1, 10, 100, 1000],
+                           'class__kernel': ['linear'],
+                           #'class__decision_function_shape': ['ovo', 'ovr']
+                           }]
     elif c_key == 'rf':
-        #param_grid = {'class__n_estimators': [100, 500, 1000],
-        #               'class__max_depth': [5, 15, 30, None],
-        #               'class__min_samples_split': [2, 10, 50],
-        #               'class__min_samples_leaf': [1, 5, 10]
-        #               }
-        param_grid = {'class__n_estimators': [100, 500, 1000],
-                       'class__max_depth': [30, None],
-                       'class__min_samples_split': [2],
-                       'class__min_samples_leaf': [1]
-                       }
+        param_grid = {'class__n_estimators': [10, 100, 500, 1000],
+                      'class__max_depth': [30, None],
+                      'class__min_samples_split': [2],
+                      'class__min_samples_leaf': [1],
+                      'class__criterion': ['gini', 'entropy']
+                      }
     else:
         print("Wrong classifier name")
         return
 
     logging.debug("Grid search")
-    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=-1)
+    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=24, verbose=1, cv=2, scoring='balanced_accuracy', return_train_score=True)
 
     search.fit(X, y)
     model = search.best_estimator_
@@ -308,7 +304,10 @@ if __name__ == '__main__':
             logging.debug("Classifier {}".format(c))
             for n in normalizers_keys:
                 logging.debug("Normalization {}".format(n))
-                unknown_combinations = itertools.combinations(multiclass_list, unknown_number)
+                #unknown_combinations = itertools.combinations(multiclass_list, unknown_number)
+
+                # ATTENTION: we noticed A04-A05 gives the best results
+                unknown_combinations = [('A04', 'A05')]
                 for u in unknown_combinations:
                     logging.debug("Unknown algorithms {}".format(u))
                     result_name = "class_{}_norm_{}_unknown_{}-{}_nfft_{}_hop-size_{}_numberlpcorder_{}_stoplpcorder_{}".format(

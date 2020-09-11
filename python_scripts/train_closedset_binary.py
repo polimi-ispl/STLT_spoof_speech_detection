@@ -166,12 +166,11 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
 
 
 def train_one_configuration(n_key, c_key, df_train, df_dev, df_eval, result_filename):
-    if os.path.exists(result_filename):
-        logging.debug("Results already computed")
-        return
+    #if os.path.exists(result_filename):
+    #    logging.debug("Results already computed")
+    #    return
 
     binary_dict = {'bonafide': 0, 'spoof': 1}
-
 
     X_train = df_train.loc[:, df_train.columns != 'label'].values
     X_dev = df_dev.loc[:, df_dev.columns != 'label'].values
@@ -186,33 +185,35 @@ def train_one_configuration(n_key, c_key, df_train, df_dev, df_eval, result_file
     y_eval = df_eval.loc[:, 'label'].values
     y_eval = np.array([binary_dict[a] for a in y_eval])
 
-    X = X_train
-    y = y_train
+    X, X_grid, y, y_grid = train_test_split(X_train, y_train, test_size=0.25, random_state=2)  # 0.25 x 0.8 = 0.2
 
     # Define the pipeline
     steps = [('norm', normalizers[n_key]), ('class', classifiers[c_key])]
     pipeline = Pipeline(steps)
 
     if c_key == 'svm':
-        param_grid = {'class__C': [100, 1000],
-                      'class__gamma': [1, 0.1, 0.01],
-                      'class__kernel': ['rbf', 'linear']
-                      }
+        param_grid = [{'class__C': [0.1, 1, 10, 100, 1000],
+                       'class__gamma': ['scale', 'auto', 1, 0.1, 0.01],
+                       'class__kernel': ['rbf'],
+                       'class__decision_function_shape': ['ovo', 'ovr']
+                       }, {'class__C': [0.1, 1, 10, 100, 1000],
+                           'class__kernel': ['linear'],
+                           'class__decision_function_shape': ['ovo', 'ovr']}]
     elif c_key == 'rf':
-        param_grid = {'class__n_estimators': [100, 500, 1000],
+        param_grid = {'class__n_estimators': [10, 100, 500, 1000],
                       'class__max_depth': [30, None],
                       'class__min_samples_split': [2],
-                      'class__min_samples_leaf': [1]
+                      'class__min_samples_leaf': [1],
+                      'class__criterion': ['gini', 'entropy']
                       }
     else:
         print("Wrong classifier name")
         return
 
-
     logging.debug("Grid search")
-    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=-1)
+    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=24, verbose=1, cv=2, scoring='balanced_accuracy', return_train_score=True)
     # Perform grid search on dev subset
-    search.fit(X_dev, y_dev)
+    search.fit(X_grid, y_grid)
     model = search.best_estimator_
     logging.debug("Fit best model")
 
