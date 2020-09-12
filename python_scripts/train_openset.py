@@ -240,7 +240,7 @@ def train_one_configuration(n_key, c_key, u, df_train, df_dev, df_eval, result_f
         return
 
     logging.debug("Grid search")
-    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=24, verbose=1, cv=2, scoring='balanced_accuracy', return_train_score=True)
+    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=32, verbose=1, cv=2, scoring='balanced_accuracy', return_train_score=True)
 
     search.fit(X, y)
     model = search.best_estimator_
@@ -304,11 +304,15 @@ if __name__ == '__main__':
             logging.debug("Classifier {}".format(c))
             for n in normalizers_keys:
                 logging.debug("Normalization {}".format(n))
-                #unknown_combinations = itertools.combinations(multiclass_list, unknown_number)
+                unknown_combinations = itertools.combinations(multiclass_list, unknown_number)
 
                 # ATTENTION: we noticed A04-A05 gives the best results
-                unknown_combinations = [('A04', 'A05')]
+                #unknown_combinations = [('A04', 'A05')]
                 for u in unknown_combinations:
+                    if u == ('A04', 'A05'):
+                        logging.debug("Already computed")
+                        continue
+
                     logging.debug("Unknown algorithms {}".format(u))
                     result_name = "class_{}_norm_{}_unknown_{}-{}_nfft_{}_hop-size_{}_numberlpcorder_{}_stoplpcorder_{}".format(
                         c, n, u[0], u[1], nfft, hop_size,
