@@ -24,7 +24,7 @@ unknown_number = 2
 
 def_nfft = [128]
 def_hop_size = [64]
-def_selected_features = ['lpc', 'bicoh', 'unet']
+def_selected_features = ['lpc', 'bicoh', 'unet_norm']
 def_number_lpc_order = 49
 def_stop_lpc_order = 50
 def_normalizers_keys = ["minmax", "zscore", "l2"]
@@ -41,12 +41,14 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
         'bicoherences/dataframes/train_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
     lpc_train_feat_path = os.path.join(feature_root_path, 'lpc/dataframe/train.pkl')
     unet_train_feat_path = os.path.join(feature_root_path, 'unet/train_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
+    unet_norm_train_feat_path = os.path.join(feature_root_path, 'unet_norm/train_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
 
     bicoh_dev_feat_path = os.path.join(
         feature_root_path,
         'bicoherences/dataframes/dev_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
     lpc_dev_feat_path = os.path.join(feature_root_path, 'lpc/dataframe/dev.pkl')
     unet_dev_feat_path = os.path.join(feature_root_path, 'unet/dev_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
+    unet_norm_dev_feat_path = os.path.join(feature_root_path, 'unet_norm/dev_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
 
 
     lpc_linspace = np.linspace(start=stop_lpc_order - number_lpc_order, stop=stop_lpc_order, dtype=int)
@@ -105,7 +107,6 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
             unet_feat_dev = pd.read_pickle(unet_dev_feat_path)
             unet_feat_dev.set_index('audio_filename', inplace=True)
 
-
             if train_features.empty:
                 train_features = unet_feat_train.copy()
 
@@ -113,6 +114,25 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
             else:
                 train_features = pd.concat([train_features, unet_feat_train], axis=1)
                 dev_features = pd.concat([dev_features, unet_feat_dev], axis=1)
+        elif feat == 'unet_norm':
+            new_norm_feat_columns = ['speaker_id', 'audio_filename', 'system_id', 'label',
+                                     'unet_norm_mse_alg_A01', 'unet_norm_mse_alg_A02', 'unet_norm_mse_alg_A03',
+                                     'unet_norm_mse_alg_A04', 'unet_norm_mse_alg_A05', 'unet_norm_mse_alg_A06']
+            unet_norm_feat_train = pd.read_pickle(unet_norm_train_feat_path)
+            unet_norm_feat_train.columns = new_norm_feat_columns
+            unet_norm_feat_train.set_index('audio_filename', inplace=True)
+
+            unet_norm_feat_dev = pd.read_pickle(unet_norm_dev_feat_path)
+            unet_norm_feat_dev.columns = new_norm_feat_columns
+            unet_norm_feat_dev.set_index('audio_filename', inplace=True)
+
+            if train_features.empty:
+                train_features = unet_norm_feat_train.copy()
+
+                dev_features = unet_norm_feat_dev.copy()
+            else:
+                train_features = pd.concat([train_features, unet_norm_feat_train], axis=1)
+                dev_features = pd.concat([dev_features, unet_norm_feat_dev], axis=1)
     # remove NaN from dataframes
     train_features.dropna(inplace=True, axis=0)
     dev_features.dropna(inplace=True, axis=0)
@@ -182,7 +202,7 @@ def train_one_configuration(n_key, c_key, df_train, df_dev, result_filename):
         return
 
     logging.debug("Grid search")
-    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=16, verbose=1, cv=2, scoring='balanced_accuracy', return_train_score=True)
+    search = GridSearchCV(pipeline, param_grid=param_grid, n_jobs=24, verbose=1, cv=2, scoring='balanced_accuracy', return_train_score=True)
     search.fit(X_dev, y_dev)
     model = search.best_estimator_
     logging.debug("Fit best model")
@@ -232,9 +252,12 @@ if __name__ == '__main__':
     # Load features
 
     # Prepare data for open set
+    logging.debug("Selected features {}".format(selected_features))
     for fft_params in zip(nfft_list, hop_size_list):
+
         nfft = fft_params[0]
         hop_size = fft_params[1]
+        logging.debug("NFFT {} Hop size {}".format(nfft, hop_size))
         df_train, df_dev = load_features(selected_features=selected_features,
                                                   number_lpc_order=number_lpc_order,
                                                   stop_lpc_order=stop_lpc_order,

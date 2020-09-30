@@ -24,7 +24,7 @@ unknown_number = 2
 
 def_nfft = [128]
 def_hop_size = [64]
-def_selected_features = ['lpc', 'bicoh', 'unet']
+def_selected_features = ['lpc', 'bicoh', 'unet_norm']
 def_number_lpc_order = 49
 def_stop_lpc_order = 50
 def_normalizers_keys = ["minmax", "zscore", "l2"]
@@ -43,6 +43,8 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
             nfft, hop_size))
     lpc_eval_feat_path = os.path.join(feature_root_path, 'lpc/dataframe/eval.pkl')
     unet_eval_feat_path = os.path.join(feature_root_path, 'unet/eval_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
+    unet_norm_eval_feat_path = os.path.join(feature_root_path,
+                                            'unet_norm/eval_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
 
     lpc_linspace = np.linspace(start=stop_lpc_order - number_lpc_order, stop=stop_lpc_order, dtype=int)
 
@@ -91,6 +93,20 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
                 eval_features = unet_feat_eval.copy()
             else:
                 eval_features = pd.concat([eval_features, unet_feat_eval], axis=1)
+        elif feat == 'unet_norm':
+            new_norm_feat_columns = ['speaker_id', 'audio_filename', 'system_id', 'label',
+                                     'unet_norm_mse_alg_A01', 'unet_norm_mse_alg_A02', 'unet_norm_mse_alg_A03',
+                                     'unet_norm_mse_alg_A04', 'unet_norm_mse_alg_A05', 'unet_norm_mse_alg_A06']
+
+            unet_norm_feat_eval = pd.read_pickle(unet_norm_eval_feat_path)
+            unet_norm_feat_eval.columns = new_norm_feat_columns
+            unet_norm_feat_eval.set_index('audio_filename', inplace=True)
+
+            if eval_features.empty:
+                eval_features = unet_norm_feat_eval.copy()
+            else:
+                eval_features = pd.concat([eval_features, unet_norm_feat_eval], axis=1)
+
     # remove NaN from dataframes
     eval_features.dropna(inplace=True, axis=0)
 
