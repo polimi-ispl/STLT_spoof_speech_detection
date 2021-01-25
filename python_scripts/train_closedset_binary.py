@@ -43,7 +43,6 @@ def load_features(selected_features, number_lpc_order, stop_lpc_order, nfft, hop
     unet_train_feat_path = os.path.join(feature_root_path, 'unet/train_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
     unet_norm_train_feat_path = os.path.join(feature_root_path, 'unet_norm/train_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
 
-
     bicoh_dev_feat_path = os.path.join(
         feature_root_path,
         'bicoherences/dataframes/dev_bicoh_stats_nfft_{}_hop_size_{}.pkl'.format(nfft, hop_size))
